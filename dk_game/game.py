@@ -283,54 +283,22 @@ class Game:
             print(f"{y:02d}|{chars}")
         print()
 
-    def render_pygame(self, scale: int = 32, caption: str = "Deterministic DK") -> None:
-        """Draw a single frame of the current state in a lightweight pygame window.
 
-        The window is closed right after drawing, which makes this helper convenient for
-        debugging or capturing screenshots without running a full episode. The
-        ``scale`` parameter controls the pixel size of each tile.
-        """
-        renderer = _PygameRenderer(self.width, self.height, scale, caption)
-        try:
-            renderer.draw(self)
-            renderer.delay(250)
-        finally:
-            renderer.close()
-
-
-def run_episode(
-    actions: List[str],
-    *,
-    render: bool = False,
-    render_scale: int = 32,
-    render_delay_ms: int = 150,
-) -> Dict[str, object]:
+def run_episode(actions: List[str]) -> Dict[str, object]:
     """Execute a full episode using ``actions``.
 
     Returns a dictionary describing the outcome with keys ``success`` (bool), ``steps`` (int),
     ``final_state`` (see :meth:`Game.get_state`) and ``reason`` (``completed`` | ``dead`` |
-    ``out_of_actions``). Set ``render=True`` to watch the episode with a minimal pygame
-    visualizer. ``render_scale`` defines the tile size in pixels and ``render_delay_ms``
-    controls how long to wait between frames.
+    ``out_of_actions``).
     """
     game = Game()
     steps = 0
     final_state = game.get_state()
     reason: Optional[str] = None
-    renderer: Optional[_PygameRenderer] = None
-    if render:
-        renderer = _PygameRenderer(game.width, game.height, render_scale)
     for action in actions:
         info = game.step(action)
         final_state = info["state"]
         steps += 1
-        if renderer:
-            if not renderer.draw(game):
-                reason = reason or "window_closed"
-                game.done = True
-                game.outcome = reason
-                break
-            renderer.delay(render_delay_ms)
         if info["done"]:
             reason = info["reason"]
             break
@@ -338,8 +306,7 @@ def run_episode(
         if not game.done:
             reason = "out_of_actions"
             game.outcome = reason
-    if renderer:
-        renderer.close()
+
     success = reason == "completed"
     return {
         "success": success,
@@ -347,60 +314,6 @@ def run_episode(
         "final_state": final_state,
         "reason": reason,
     }
-
-
-class _PygameRenderer:
-    """Very small pygame helper that draws the tile grid."""
-
-    def __init__(self, width: int, height: int, scale: int, caption: str = "Deterministic DK"):
-        self.scale = scale
-        try:
-            import pygame
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "pygame is required for visual rendering. Install it with 'pip install pygame'."
-            ) from exc
-        self.pg = pygame
-        self.pg.init()
-        self.surface = self.pg.display.set_mode((width * scale, height * scale))
-        self.pg.display.set_caption(caption)
-        self.clock = self.pg.time.Clock()
-        self.colors = {
-            TILE_EMPTY: (18, 18, 18),
-            TILE_PLATFORM: (150, 75, 0),
-            TILE_LADDER: (200, 200, 80),
-            TILE_PLAYER: (80, 200, 255),
-            TILE_BARREL: (210, 95, 32),
-            TILE_GOAL: (255, 105, 180),
-        }
-
-    def draw(self, game: Game) -> bool:
-        """Draw the game's grid. Returns False if the user closes the window."""
-        for event in self.pg.event.get():
-            if event.type == self.pg.QUIT:
-                return False
-        grid = game.get_state()["grid"]
-        self.surface.fill((8, 8, 8))
-        for y, row in enumerate(grid):
-            for x, tile in enumerate(row):
-                color = self.colors.get(tile, (255, 255, 255))
-                rect = self.pg.Rect(x * self.scale, y * self.scale, self.scale, self.scale)
-                self.pg.draw.rect(self.surface, color, rect)
-                if tile in (TILE_LADDER, TILE_PLATFORM):
-                    self.pg.draw.rect(
-                        self.surface,
-                        (0, 0, 0),
-                        rect,
-                        1,
-                    )
-        self.pg.display.flip()
-        return True
-
-    def delay(self, delay_ms: int) -> None:
-        self.pg.time.delay(delay_ms)
-
-    def close(self) -> None:
-        self.pg.quit()
 
 
 if __name__ == "__main__":
