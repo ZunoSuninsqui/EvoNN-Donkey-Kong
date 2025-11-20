@@ -141,19 +141,108 @@ class Game:
         return background, background_rect
 
     def _build_platforms(self) -> List[pygame.Rect]:
-        """Plataformas alineadas con las vigas rojas del fondo.
+        PLATFORM_HEIGHT = 25
+        STAIR_PLATFORM_WIDTH = 53
 
-        Ajusta las posiciones/tamaños si cambias la resolución o la imagen de fondo.
-        """
-        return [
-            pygame.Rect(0, 730, 812, 20),  # Viga inferior (suelo).
-            pygame.Rect(40, 640, 740, 16),  # Segunda viga desde abajo.
-            pygame.Rect(10, 560, 770, 16),  # Tercera viga desde abajo.
-            pygame.Rect(30, 480, 740, 16),  # Cuarta viga desde abajo.
-            pygame.Rect(0, 400, 780, 16),  # Quinta viga desde abajo.
-            pygame.Rect(50, 320, 720, 16),  # Sexta viga desde abajo.
-            pygame.Rect(160, 240, 480, 16),  # Plataforma superior bajo Donkey/Pauline.
-        ]
+        platforms: List[pygame.Rect] = []
+
+        # ----- VIGA INFERIOR IZQUIERDA (suelo grande) -----
+        platforms.append(pygame.Rect(60, 740, 365, PLATFORM_HEIGHT))
+
+        # ----- PRIMERA CAPA ESCALONADA (abajo a la derecha) -----
+        #  x: 425, 478, 531, 584, 637, 690, 743  -> suma 53 cada vez
+        #  y: 737, 733, 729, 726, 723, 720, 717  -> resta 3 cada vez
+        start_x = 425
+        start_y = 737
+        dx = STAIR_PLATFORM_WIDTH  # +53 en X
+        dy = -3  # -3 en Y
+
+        for i in range(7):  # 7 plataformas
+            x = start_x + i * dx
+            y = start_y + i * dy
+            platforms.append(pygame.Rect(x, y, STAIR_PLATFORM_WIDTH, PLATFORM_HEIGHT))
+
+        # ----- SEGUNDA CAPA ESCALONADA -----
+        #  x: 58, 111, 164, 217, 270, 323       -> +53 en X
+        #  y: 610, 613, 616, 619, 622, 625      -> +3 en Y
+        start_x = 58
+        start_y = 610
+        dx = STAIR_PLATFORM_WIDTH  # +53 en X
+        dy = 3  # +3 en Y
+
+        for i in range(13):  # 6 plataformas
+            x = start_x + i * dx
+            y = start_y + i * dy
+            platforms.append(pygame.Rect(x, y, STAIR_PLATFORM_WIDTH, PLATFORM_HEIGHT))
+
+
+        #Tercera capa escalonada
+        start_x = 110
+        start_y = 540
+        dx = STAIR_PLATFORM_WIDTH  # +53 en X
+        dy = -3  # -4 en Y para hacerlas subir
+
+        for i in range(13):  # 6 plataformas
+
+            x = start_x + i * dx
+            y = start_y + i * dy
+            platforms.append(pygame.Rect(x, y, STAIR_PLATFORM_WIDTH, PLATFORM_HEIGHT))
+
+
+        #Cuarta
+        start_x = 58
+        start_y = 393
+        dx = STAIR_PLATFORM_WIDTH  # +53 en X
+        dy = 3  # +3 en Y
+
+        for i in range(13):  # 6 plataformas
+            x = start_x + i * dx
+            y = start_y + i * dy
+            platforms.append(pygame.Rect(x, y, STAIR_PLATFORM_WIDTH, PLATFORM_HEIGHT))
+
+
+
+        # QUITA capa escalonada
+        start_x = 110
+        start_y = 325
+        dx = STAIR_PLATFORM_WIDTH  # +53 en X
+        dy = -3  # -4 en Y para hacerlas subir
+
+        for i in range(13):  # 6 plataformas
+
+            x = start_x + i * dx
+            y = start_y + i * dy
+            platforms.append(pygame.Rect(x, y, STAIR_PLATFORM_WIDTH, PLATFORM_HEIGHT))
+        # ----- RESTO DE VIGAS (de momento rectas completas) -----
+
+        # SEXTA
+        start_x = 530
+        start_y = 205
+        dx = STAIR_PLATFORM_WIDTH  # +53 en X
+        dy = 3  # +3 en Y
+
+        for i in range(4):  # 6 plataformas
+            x = start_x + i * dx
+            y = start_y + i * dy
+            platforms.append(pygame.Rect(x, y, STAIR_PLATFORM_WIDTH, PLATFORM_HEIGHT))
+
+        platforms.extend([
+            pygame.Rect(58, 202, 472, PLATFORM_HEIGHT),  # Plataforma superior.
+            pygame.Rect(345, 110, 160, PLATFORM_HEIGHT), #PLATAFORMA PRINCESA
+
+        ])
+
+        return platforms
+
+    def debug_draw_platforms(self, surface):
+        """Dibuja las plataformas invisibles con transparencia para depuración."""
+        debug_color = (255, 255, 255, 150)  # Blanco con opacidad 50
+
+        for rect in self.platforms:
+            # Crear surface con alpha
+            s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            s.fill(debug_color)
+            surface.blit(s, (rect.x, rect.y))
 
     def _build_ladders(self) -> List[pygame.Rect]:
         """Escaleras invisibles alineadas con las blancas del fondo."""
@@ -186,6 +275,7 @@ class Game:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill((0, 0, 0))
         surface.blit(self.background, self.background_rect)
+        self.debug_draw_platforms(surface)
         self.player.draw(surface)
 
 
