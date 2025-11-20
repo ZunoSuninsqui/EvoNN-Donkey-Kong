@@ -12,7 +12,7 @@ from typing import Dict, Iterable, List, Optional
 
 import pygame
 
-from dk_game.game import (
+from game import (
     ACTIONS,
     TILE_BARREL,
     TILE_GOAL,
