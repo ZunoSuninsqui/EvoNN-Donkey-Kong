@@ -2,12 +2,21 @@
 
 The module renders the original background art and overlays invisible rectangles
 for platforms and ladders so the player can climb and walk with simple physics.
+
+NEAT / IA integration
+---------------------
+The original human-playable mode is preserved. A lightweight environment class
+(`GameEnv`) wraps :class:`Game` so external agents (e.g. NEAT) can drive Mario
+with discrete actions, step the simulation frame by frame, and receive a small
+observation vector. The environment is intentionally minimal so that
+``python ExecuteGame.py`` keeps behaving like before, while training scripts can
+import ``GameEnv``.
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import pygame
 
@@ -50,6 +59,33 @@ FPS = 60
 STATE_PLAYING = "PLAYING"
 STATE_GAME_OVER = "GAME_OVER"
 STATE_WIN = "WIN"
+
+
+class _ActionKeys:
+    """Lightweight mapping to emulate ``pygame.key.get_pressed`` for AI actions."""
+
+    def __init__(self, pressed: List[int]):
+        self._pressed = set(pressed)
+
+    def __getitem__(self, key: int) -> bool:  # pragma: no cover - trivial
+        return key in self._pressed
+
+
+ACTION_MAPPING = {
+    0: [],  # Noop
+    1: [pygame.K_LEFT],
+    2: [pygame.K_RIGHT],
+    3: [pygame.K_SPACE],
+    4: [pygame.K_UP],
+    5: [pygame.K_DOWN],
+}
+
+
+def action_to_keys(action: int) -> _ActionKeys:
+    """Return an object that mimics ``pygame.key.get_pressed`` for a discrete action."""
+
+    pressed = ACTION_MAPPING.get(action, [])
+    return _ActionKeys(pressed)
 
 
 class Player:
@@ -492,7 +528,12 @@ class Game:
         barrel = Barrel((spawn_x, spawn_y), direction=1)  # primero hacia la derecha
         self.barrels.append(barrel)
 
-    def update(self, keys: pygame.key.ScancodeWrapper) -> None:
+    def update(
+        self,
+        keys: Optional[pygame.key.ScancodeWrapper] = None,
+        action: int | None = None,
+        control_mode: str = "human",
+    ) -> None:
         if self.game_state != STATE_PLAYING:
             return
 
@@ -508,6 +549,10 @@ class Game:
 
         # Input solo si ya se cumplió el retardo inicial.
         if self.can_control:
+            if control_mode == "ai":
+                keys = action_to_keys(action if action is not None else 0)
+            elif keys is None:
+                keys = pygame.key.get_pressed()
             self.player.handle_input(keys, self.ladders, self.platforms)
 
         self.player.update(self.platforms, self.ladders, self.screen_rect)
@@ -528,10 +573,12 @@ class Game:
         if self.game_state == STATE_PLAYING and self.player.rect.colliderect(self.princess_rect):
             self.game_state = STATE_WIN
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, show_debug: bool = True) -> None:
         surface.fill((0, 0, 0))
         surface.blit(self.background, self.background_rect)
-        self.debug_draw_platforms(surface)
+
+        if show_debug:
+            self.debug_draw_platforms(surface)
 
         # Dibujar barriles
         for barrel in self.barrels:
@@ -556,6 +603,204 @@ class Game:
             text = font.render("HAS RESCATADO A LA PRINCESA! - Pulsa R", True, (50, 255, 50))
             rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
             surface.blit(text, rect)
+
+
+class GameEnv:
+    """Simple environment wrapper so NEAT (or any agent) can control the game.
+
+    Parameters
+    ----------
+    mode:
+        ``"ai"`` to consume discrete actions, ``"human"`` to use keyboard events.
+    render:
+        Whether to create/update a pygame surface. Disable during headless
+        training for speed.
+    fast_mode:
+        Skip FPS limits when ``True`` so training runs faster.
+    record:
+        When ``True`` stores the action/state history for later replay.
+    show_debug:
+        Toggle rendering of platform/ladder overlays.
+    max_steps:
+        Hard limit for episode length (frames).
+    surface:
+        Optional surface where the game will be drawn (used in multi-agent demos).
+    """
+
+    ACTIONS = ACTION_MAPPING
+
+    def __init__(
+        self,
+        mode: str = "ai",
+        render: bool = False,
+        fast_mode: bool = False,
+        record: bool = False,
+        show_debug: bool = True,
+        max_steps: int = 4000,
+        surface: Optional[pygame.Surface] = None,
+    ) -> None:
+        pygame.init()
+        self.mode = mode
+        self.render = render
+        self.fast_mode = fast_mode
+        self.show_debug = show_debug
+        self.record_enabled = record
+        self.max_steps = max_steps
+        self.external_surface = surface
+        self.clock = pygame.time.Clock()
+
+        if render and surface is None:
+            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+            pygame.display.set_caption("Donkey Kong NEAT Training")
+        else:
+            # Off-screen surface to keep draw logic simple when not rendering.
+            self.screen = surface or pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+
+        self.game: Game | None = None
+        self.recorded_steps: List[dict] = []
+        self.total_reward: float = 0.0
+        self.max_height: float = 0.0
+        self.frame: int = 0
+        self.done: bool = False
+        self.reset()
+
+    # ------------------------------------------------------------------
+    # Environment API
+    # ------------------------------------------------------------------
+    def reset(self) -> List[float]:
+        """Restart the game and return the initial observation vector."""
+
+        self.game = Game()
+        self.recorded_steps = []
+        self.total_reward = 0.0
+        self.frame = 0
+        self.done = False
+        self.max_height = SCREEN_HEIGHT - self.game.player.rect.y
+        return self.get_state()
+
+    def get_state(self) -> List[float]:
+        """Return the 10-element observation vector expected by NEAT."""
+
+        assert self.game is not None
+        player = self.game.player
+        px = player.rect.centerx / SCREEN_WIDTH
+        py = player.rect.centery / SCREEN_HEIGHT
+        is_grounded = 1.0 if player.on_ground else 0.0
+        is_climbing = 1.0 if player.on_ladder else 0.0
+
+        ladder, near_ladder = self._nearest_ladder()
+        ladder_x_norm = ladder.centerx / SCREEN_WIDTH if ladder else 0.0
+        is_near_ladder = 1.0 if near_ladder else 0.0
+
+        barrel = self._nearest_barrel()
+        if barrel:
+            barrel_x = barrel.rect.centerx / SCREEN_WIDTH
+            barrel_y = barrel.rect.centery / SCREEN_HEIGHT
+            barrel_vx = barrel.vel_x / 10.0
+            barrel_vy = barrel.vel_y / 10.0
+        else:
+            barrel_x = barrel_y = barrel_vx = barrel_vy = 0.0
+
+        return [
+            px,
+            py,
+            is_grounded,
+            is_climbing,
+            is_near_ladder,
+            ladder_x_norm,
+            barrel_x,
+            barrel_y,
+            barrel_vx,
+            barrel_vy,
+        ]
+
+    def step(self, action: int) -> tuple[List[float], float, bool, dict]:
+        """Advance one frame using a discrete action.
+
+        Returns the tuple ``(state, reward, done, info)``.
+        """
+
+        if self.done:
+            return self.get_state(), 0.0, True, {"game_state": STATE_GAME_OVER}
+
+        assert self.game is not None
+        self.frame += 1
+        self.game.update(action=action, control_mode=self.mode)
+
+        state = self.get_state()
+        reward = 1.0 / 60.0  # small survival reward
+
+        current_height = SCREEN_HEIGHT - self.game.player.rect.centery
+        if current_height > self.max_height:
+            reward += (current_height - self.max_height) / 10.0
+            self.max_height = current_height
+
+        if self.game.game_state == STATE_WIN:
+            reward += 1000.0
+            self.done = True
+        elif self.game.game_state == STATE_GAME_OVER:
+            reward -= 5.0
+            self.done = True
+
+        if self.frame >= self.max_steps:
+            self.done = True
+
+        self.total_reward += reward
+
+        if self.record_enabled:
+            self.recorded_steps.append({
+                "frame": self.frame,
+                "action": int(action),
+                "state": state,
+            })
+
+        if self.render:
+            self.render_frame()
+
+        return state, reward, self.done, {
+            "game_state": self.game.game_state,
+            "fitness": self.total_reward,
+        }
+
+    def render_frame(self) -> None:
+        assert self.game is not None
+        self.game.draw(self.screen, show_debug=self.show_debug)
+
+        # If an external surface is provided (multi-agent demo) the caller will
+        # handle the blit. Otherwise flip the main display.
+        if self.render and self.external_surface is None:
+            pygame.display.flip()
+
+        if self.render and not self.fast_mode:
+            self.clock.tick(FPS)
+
+    def get_recorded_actions(self) -> List[dict]:
+        return list(self.recorded_steps)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _nearest_ladder(self) -> tuple[Optional[pygame.Rect], bool]:
+        assert self.game is not None
+        player_x = self.game.player.rect.centerx
+        nearest = None
+        best_dx = float("inf")
+        for ladder in self.game.ladders:
+            dx = abs(player_x - ladder.centerx)
+            if dx < best_dx:
+                best_dx = dx
+                nearest = ladder
+        return nearest, bool(best_dx <= LADDER_ALIGN_TOLERANCE * 1.5)
+
+    def _nearest_barrel(self) -> Optional[Barrel]:
+        assert self.game is not None
+        if not self.game.barrels:
+            return None
+        player_pos = self.game.player.rect.center
+        return min(
+            self.game.barrels,
+            key=lambda b: (b.rect.centerx - player_pos[0]) ** 2 + (b.rect.centery - player_pos[1]) ** 2,
+        )
 
 
 def main() -> None:
