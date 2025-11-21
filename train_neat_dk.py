@@ -3,8 +3,9 @@
 Usage
 -----
 python train_neat_dk.py --generations 50
-python train_neat_dk.py --visual  # slower, shows multiple agents at once
-python train_neat_dk.py --live    # live grid with multiple agents per generation
+python train_neat_dk.py --visual       # slower, shows multiple agents at once
+python train_neat_dk.py --live         # live grid with multiple agents per generation
+python train_neat_dk.py --live-shared  # shared-map viewer with several agents together
 """
 from __future__ import annotations
 
@@ -19,10 +20,13 @@ import threading
 import neat
 
 from Game.ExecuteGame import GameEnv, SCREEN_HEIGHT, SCREEN_WIDTH
+from shared_viewer import SharedGameViewer
 
 BEST_RUN: dict = {"fitness": float("-inf"), "record": None, "genome": None}
 RUN_VISUAL = False
 RUN_LIVE = False
+RUN_LIVE_SHARED = False
+SHARED_VIEWER: SharedGameViewer | None = None
 
 
 def argmax_action(outputs: List[float]) -> int:
@@ -170,7 +174,7 @@ def eval_genomes(genomes, config):
     live_stop: threading.Event | None = None
     live_thread: threading.Thread | None = None
 
-    if RUN_LIVE:
+    if RUN_LIVE and not RUN_LIVE_SHARED:
         live_stop = threading.Event()
         live_thread = threading.Thread(
             target=render_generation_live, args=(genomes, config, live_stop), daemon=True
@@ -190,6 +194,12 @@ def eval_genomes(genomes, config):
     if RUN_VISUAL:
         render_top_agents(genomes, config)
 
+    if RUN_LIVE_SHARED:
+        global SHARED_VIEWER
+        if SHARED_VIEWER is None:
+            SHARED_VIEWER = SharedGameViewer()
+        SHARED_VIEWER.render_generation(genomes, config)
+
 
 def save_artifacts(genome: neat.DefaultGenome, record: list | None) -> None:
     with open("best_genome.pkl", "wb") as f:
@@ -201,18 +211,25 @@ def save_artifacts(genome: neat.DefaultGenome, record: list | None) -> None:
 
 
 def main() -> None:
-    global RUN_VISUAL, RUN_LIVE, LIVE_MAX_AGENTS
+    global RUN_VISUAL, RUN_LIVE, RUN_LIVE_SHARED, LIVE_MAX_AGENTS
 
     parser = argparse.ArgumentParser(description="Train NEAT to play Donkey Kong")
     parser.add_argument("--config", default="config-neat-dk.ini", help="Path to NEAT config file")
     parser.add_argument("--generations", type=int, default=50, help="Number of generations to train")
     parser.add_argument("--visual", action="store_true", help="Render a small visual demo each generation")
     parser.add_argument("--live", action="store_true", help="Live grid of multiple agents per generation")
+    parser.add_argument(
+        "--live-shared",
+        action="store_true",
+        help="Show several agents together in a single shared Donkey Kong map",
+    )
     args = parser.parse_args()
 
     RUN_VISUAL = args.visual
     global RUN_LIVE
     RUN_LIVE = args.live
+    global RUN_LIVE_SHARED
+    RUN_LIVE_SHARED = args.live_shared
 
     config_path = Path(args.config)
     config = neat.Config(
