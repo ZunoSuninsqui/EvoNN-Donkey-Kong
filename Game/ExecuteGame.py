@@ -342,11 +342,19 @@ class Game:
         # Estado del juego
         self.game_state = STATE_PLAYING
 
-    def _load_background(self) -> tuple[pygame.Surface, pygame.Rect]:
-        raw_bg = pygame.image.load(os.fspath(BACKGROUND_PATH)).convert()
+    def _load_background(self):
+        img = pygame.image.load(os.fspath(BACKGROUND_PATH))
+
+        # Si hay display, usa convert(), si no, usa convert_alpha()
+        if pygame.display.get_surface():
+            raw_bg = img.convert()
+        else:
+            raw_bg = img.convert_alpha()
+
         bg_rect = raw_bg.get_rect()
         scale = min(SCREEN_WIDTH / bg_rect.width, SCREEN_HEIGHT / bg_rect.height)
         scaled_size = (int(bg_rect.width * scale), int(bg_rect.height * scale))
+
         background = pygame.transform.smoothscale(raw_bg, scaled_size)
         background_rect = background.get_rect(center=self.screen_rect.center)
         return background, background_rect
@@ -640,6 +648,8 @@ class GameEnv:
         surface: Optional[pygame.Surface] = None,
     ) -> None:
         pygame.init()
+        pygame.font.init()
+
         self.mode = mode
         self.render = render
         self.fast_mode = fast_mode
@@ -650,10 +660,17 @@ class GameEnv:
         self.clock = pygame.time.Clock()
 
         if render and surface is None:
+            # Modo visual normal: ventana completa
             self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
             pygame.display.set_caption("Donkey Kong NEAT Training")
         else:
-            # Off-screen surface to keep draw logic simple when not rendering.
+            # Modo headless (entrenamiento rápido):
+            # Si aún no hay ningún display, creamos uno mínimo para que
+            # convert()/convert_alpha() no fallen.
+            if not pygame.display.get_surface():
+                pygame.display.set_mode((1, 1))
+
+            # Superficie interna donde dibuja el juego (aunque luego no se muestre)
             self.screen = surface or pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 
         self.game: Game | None = None
