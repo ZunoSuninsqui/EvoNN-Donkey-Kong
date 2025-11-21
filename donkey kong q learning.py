@@ -1,4 +1,3 @@
-"""Donkey Kong con Red Neuronal que aprende a jugar usando Reinforcement Learning."""
 
 from __future__ import annotations
 
@@ -10,7 +9,6 @@ from typing import List, Tuple
 from dataclasses import dataclass
 import os
 
-# ==== PHYSICS TUNING =================================================
 GRAVITY = 0.7
 MOVE_SPEED = 3
 LADDER_SPEED = 3
@@ -22,8 +20,7 @@ SMALL_STEP_HEIGHT = 12
 BARREL_SPAWN_INTERVAL_SECONDS = 2.0
 BARREL_SPEED_X = 3
 BARREL_SIZE = 22
-START_DELAY_SECONDS = 0.5  # Reducido para entrenamiento más rápido
-# =====================================================================
+START_DELAY_SECONDS = 0.5
 
 SCREEN_WIDTH = 812
 SCREEN_HEIGHT = 782
@@ -53,14 +50,12 @@ class TrainingStats:
 
 
 class NeuralNetwork:
-    """Red neuronal simple para el agente de RL."""
     
     def __init__(self, input_size: int, hidden_size: int, output_size: int):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
         
-        # Inicialización de pesos
         self.w1 = np.random.randn(input_size, hidden_size) * 0.5
         self.b1 = np.zeros((1, hidden_size))
         self.w2 = np.random.randn(hidden_size, output_size) * 0.5
@@ -70,20 +65,17 @@ class NeuralNetwork:
         return np.maximum(0, x)
     
     def forward(self, x):
-        """Forward pass."""
         self.z1 = np.dot(x, self.w1) + self.b1
         self.a1 = self.relu(self.z1)
         self.z2 = np.dot(self.a1, self.w2) + self.b2
         return self.z2
     
     def predict(self, state):
-        """Predice la mejor acción dado un estado."""
         state_array = np.array(state).reshape(1, -1)
         q_values = self.forward(state_array)
         return q_values[0]
     
     def save_weights(self, filepath: str):
-        """Guarda los pesos de la red."""
         weights = {
             'w1': self.w1.tolist(),
             'b1': self.b1.tolist(),
@@ -94,7 +86,6 @@ class NeuralNetwork:
             json.dump(weights, f)
     
     def load_weights(self, filepath: str):
-        """Carga los pesos de la red."""
         if os.path.exists(filepath):
             with open(filepath, 'r') as f:
                 weights = json.load(f)
@@ -107,7 +98,6 @@ class NeuralNetwork:
 
 
 class ReplayBuffer:
-    """Buffer para almacenar experiencias de entrenamiento."""
     
     def __init__(self, max_size: int = 2000):
         self.buffer = []
@@ -126,24 +116,19 @@ class ReplayBuffer:
 
 
 class AIAgent:
-    """Agente de RL que aprende a jugar Donkey Kong."""
     
-    # Acciones posibles: NADA, IZQUIERDA, DERECHA, SALTO, ARRIBA, ABAJO
     ACTIONS = [
-        [],  # 0: Nada
-        [pygame.K_LEFT],  # 1: Izquierda
-        [pygame.K_RIGHT],  # 2: Derecha
-        [pygame.K_SPACE],  # 3: Saltar
-        [pygame.K_UP],  # 4: Subir escalera
-        [pygame.K_DOWN],  # 5: Bajar escalera
-        [pygame.K_LEFT, pygame.K_SPACE],  # 6: Saltar izquierda
-        [pygame.K_RIGHT, pygame.K_SPACE],  # 7: Saltar derecha
+        [],
+        [pygame.K_LEFT],
+        [pygame.K_RIGHT],
+        [pygame.K_SPACE],
+        [pygame.K_UP],
+        [pygame.K_DOWN],
+        [pygame.K_LEFT, pygame.K_SPACE],
+        [pygame.K_RIGHT, pygame.K_SPACE],
     ]
     
     def __init__(self):
-        # Estado: [player_x, player_y, player_vel_y, on_ground, on_ladder,
-        #          closest_barrel_x, closest_barrel_y, closest_barrel_vel_x,
-        #          princess_x, princess_y, distance_to_princess]
         input_size = 11
         hidden_size = 64
         output_size = len(self.ACTIONS)
@@ -151,9 +136,8 @@ class AIAgent:
         self.network = NeuralNetwork(input_size, hidden_size, output_size)
         self.replay_buffer = ReplayBuffer(max_size=2000)
         
-        # Hiperparámetros
-        self.gamma = 0.95  # Factor de descuento
-        self.epsilon = 1.0  # Exploración inicial
+        self.gamma = 0.95
+        self.epsilon = 1.0
         self.epsilon_min = 0.05
         self.epsilon_decay = 0.995
         self.learning_rate = 0.001
@@ -164,10 +148,8 @@ class AIAgent:
         self.last_distance_to_princess = float('inf')
         
     def get_state(self, game) -> List[float]:
-        """Extrae el estado del juego."""
         player = game.player
         
-        # Encontrar el barril más cercano
         closest_barrel_x, closest_barrel_y, closest_barrel_vel_x = 0, 0, 0
         if game.barrels:
             closest = min(game.barrels, 
@@ -180,7 +162,6 @@ class AIAgent:
             closest_barrel_x = 0
             closest_barrel_y = 1
         
-        # Normalizar valores
         state = [
             player.rect.x / SCREEN_WIDTH,
             player.rect.y / SCREEN_HEIGHT,
@@ -197,11 +178,9 @@ class AIAgent:
         return state
     
     def _distance_to_princess(self, player, princess_rect):
-        """Calcula distancia Manhattan a la princesa."""
         return abs(player.rect.x - princess_rect.x) + abs(player.rect.y - princess_rect.y)
     
     def choose_action(self, state, training=True):
-        """Elige una acción usando epsilon-greedy."""
         if training and random.random() < self.epsilon:
             return random.randint(0, len(self.ACTIONS) - 1)
         
@@ -209,10 +188,8 @@ class AIAgent:
         return np.argmax(q_values)
     
     def calculate_reward(self, game, prev_state, action) -> float:
-        """Calcula la recompensa."""
-        reward = 0.01  # Pequeña recompensa por sobrevivir
+        reward = 0.01
         
-        # Recompensa por acercarse a la princesa
         current_distance = self._distance_to_princess(game.player, game.princess_rect)
         if current_distance < self.last_distance_to_princess:
             reward += 0.5
@@ -220,22 +197,18 @@ class AIAgent:
             reward -= 0.1
         self.last_distance_to_princess = current_distance
         
-        # Recompensa por subir (y más alto)
         if game.player.rect.y < 400:
             reward += 0.3
         
-        # Gran penalización por morir o caerse
         if game.game_state == STATE_GAME_OVER:
             reward = -10.0
         
-        # Gran recompensa por ganar
         if game.game_state == STATE_WIN:
             reward = 100.0
         
         return reward
     
     def train_step(self):
-        """Entrena la red con un batch del replay buffer."""
         if self.replay_buffer.size() < self.batch_size:
             return
         
@@ -245,7 +218,6 @@ class AIAgent:
             state_array = np.array(state).reshape(1, -1)
             next_state_array = np.array(next_state).reshape(1, -1)
             
-            # Q-learning: Q(s,a) = r + gamma * max(Q(s',a'))
             current_q = self.network.forward(state_array)[0]
             target_q = current_q.copy()
             
@@ -255,21 +227,16 @@ class AIAgent:
                 next_q = self.network.forward(next_state_array)[0]
                 target_q[action] = reward + self.gamma * np.max(next_q)
             
-            # Gradient descent (simplificado)
             self._update_weights(state_array, target_q.reshape(1, -1))
         
-        # Decaer epsilon
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
     
     def _update_weights(self, state, target_q):
-        """Actualiza los pesos usando backpropagation simplificado."""
-        # Forward pass
         z1 = np.dot(state, self.network.w1) + self.network.b1
         a1 = self.network.relu(z1)
         z2 = np.dot(a1, self.network.w2) + self.network.b2
         
-        # Backward pass
         dz2 = z2 - target_q
         dw2 = np.dot(a1.T, dz2)
         db2 = np.sum(dz2, axis=0, keepdims=True)
@@ -279,19 +246,16 @@ class AIAgent:
         dw1 = np.dot(state.T, dz1)
         db1 = np.sum(dz1, axis=0, keepdims=True)
         
-        # Update
         self.network.w2 -= self.learning_rate * dw2
         self.network.b2 -= self.learning_rate * db2
         self.network.w1 -= self.learning_rate * dw1
         self.network.b1 -= self.learning_rate * db1
     
     def save_model(self):
-        """Guarda el modelo entrenado."""
         self.network.save_weights(AI_WEIGHTS_PATH)
         print(f"Modelo guardado en {AI_WEIGHTS_PATH}")
     
     def load_model(self):
-        """Carga un modelo entrenado."""
         return self.network.load_weights(AI_WEIGHTS_PATH)
 
 
@@ -373,11 +337,9 @@ class Player:
             self.vel_y = min(self.vel_y + GRAVITY, MAX_FALL_SPEED)
 
     def move_and_collide(self, platforms: List[pygame.Rect], screen_rect: pygame.Rect) -> bool:
-        """Retorna True si el jugador se cayó fuera del área de juego."""
         old_rect = self.rect.copy()
         self.rect.x += self.vel_x
         
-        # Limitar movimiento horizontal con bordes
         if self.rect.left < 50:
             self.rect.left = 50
             self.vel_x = 0
@@ -420,14 +382,12 @@ class Player:
                     self.rect.top = platform.bottom
                     self.vel_y = 0
 
-        # Verificar si cayó muy abajo (fuera del juego)
         if self.rect.top > SCREEN_HEIGHT + 50:
-            return True  # Se cayó fuera
+            return True
         
-        return False  # Todo bien
+        return False
 
     def update(self, platforms: List[pygame.Rect], ladders: List[pygame.Rect], screen_rect: pygame.Rect) -> bool:
-        """Retorna True si el jugador se cayó fuera del área de juego."""
         self.apply_gravity()
         fell_off = self.move_and_collide(platforms, screen_rect)
         return fell_off
@@ -614,7 +574,6 @@ class Game:
         if self.can_control:
             self.player.handle_input(keys, self.ladders, self.platforms)
 
-        # Verificar si el jugador se cayó
         fell_off = self.player.update(self.platforms, self.ladders, self.screen_rect)
         if fell_off:
             self.game_state = STATE_GAME_OVER
@@ -638,10 +597,9 @@ class Game:
         else:
             surface.fill((20, 20, 40))
         
-        # Dibujar bordes visuales
         border_color = (100, 100, 100)
-        pygame.draw.rect(surface, border_color, pygame.Rect(45, 0, 5, SCREEN_HEIGHT))  # Borde izquierdo
-        pygame.draw.rect(surface, border_color, pygame.Rect(SCREEN_WIDTH - 50, 0, 5, SCREEN_HEIGHT))  # Borde derecho
+        pygame.draw.rect(surface, border_color, pygame.Rect(45, 0, 5, SCREEN_HEIGHT))
+        pygame.draw.rect(surface, border_color, pygame.Rect(SCREEN_WIDTH - 50, 0, 5, SCREEN_HEIGHT))
         
         if show_debug:
             self._debug_draw_platforms(surface)
@@ -673,23 +631,19 @@ def main():
     pygame.display.set_caption("Donkey Kong - IA con Aprendizaje")
     clock = pygame.time.Clock()
     
-    # Estados del juego
     game_mode = STATE_MENU
     game = None
     ai_agent = AIAgent()
     
-    # Intentar cargar modelo existente
     if ai_agent.load_model():
         print("Modelo cargado exitosamente!")
     
-    # Variables de entrenamiento
     training_speed = 1
     prev_state = None
     prev_action = None
     episodes_this_session = 0
     score_history = []
     
-    # Botones del menú
     button_play = Button(SCREEN_WIDTH//2 - 150, 250, 300, 60, "JUGAR (Humano)")
     button_train = Button(SCREEN_WIDTH//2 - 150, 340, 300, 60, "ENTRENAR IA", (180, 70, 70))
     button_ai_demo = Button(SCREEN_WIDTH//2 - 150, 430, 300, 60, "VER IA JUGANDO", (70, 180, 70))
@@ -703,14 +657,13 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
             
-            # Menú principal
             if game_mode == STATE_MENU:
                 if button_play.handle_event(event):
                     game_mode = STATE_PLAYING
                     game = Game()
                 elif button_train.handle_event(event):
                     game_mode = STATE_TRAINING
-                    game = Game(use_background=False)  # Sin fondo para más velocidad
+                    game = Game(use_background=False)
                     prev_state = None
                     prev_action = None
                     episodes_this_session = 0
@@ -721,27 +674,22 @@ def main():
                     game = Game()
                     prev_state = None
             
-            # Botón de regresar al menú
             elif game_mode in [STATE_PLAYING, STATE_AI_DEMO]:
                 if button_back.handle_event(event):
                     game_mode = STATE_MENU
                     game = None
         
-        # ===== MODO: MENÚ =====
         if game_mode == STATE_MENU:
             screen.fill((20, 30, 50))
             
-            # Título
             font_title = pygame.font.SysFont("Arial", 48, bold=True)
             title = font_title.render("DONKEY KONG IA", True, (255, 200, 50))
             screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 150)))
             
-            # Botones
             button_play.draw(screen)
             button_train.draw(screen)
             button_ai_demo.draw(screen)
             
-            # Estadísticas
             font_stats = pygame.font.SysFont("Arial", 18)
             stats_text = [
                 f"Episodios entrenados: {ai_agent.stats.episodes}",
@@ -755,7 +703,6 @@ def main():
                 screen.blit(surf, (SCREEN_WIDTH//2 - surf.get_width()//2, y_offset))
                 y_offset += 30
         
-        # ===== MODO: JUGANDO (HUMANO) =====
         elif game_mode == STATE_PLAYING:
             keys = pygame.key.get_pressed()
             
@@ -768,7 +715,6 @@ def main():
             game.draw(screen, show_debug=False)
             button_back.draw(screen)
             
-            # Mensajes de estado
             font = pygame.font.SysFont("Arial", 32, bold=True)
             if game.game_state == STATE_PLAYING and not game.can_control:
                 text = font.render("PREPÁRATE...", True, (255, 255, 0))
@@ -780,18 +726,15 @@ def main():
                 text = font.render("¡VICTORIA! - Pulsa R", True, (50, 255, 50))
                 screen.blit(text, text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)))
         
-        # ===== MODO: ENTRENAMIENTO =====
         elif game_mode == STATE_TRAINING:
             keys = pygame.key.get_pressed()
             
-            # Salir del entrenamiento
             if keys[pygame.K_ESCAPE]:
                 game_mode = STATE_MENU
                 ai_agent.save_model()
                 game = None
                 continue
             
-            # Cambiar velocidad de entrenamiento
             if keys[pygame.K_1]:
                 training_speed = 1
             elif keys[pygame.K_2]:
@@ -799,23 +742,18 @@ def main():
             elif keys[pygame.K_3]:
                 training_speed = 10
             
-            # Lógica de entrenamiento
             if game.game_state == STATE_PLAYING:
-                # Obtener estado actual
                 current_state = ai_agent.get_state(game)
                 
-                # Elegir acción
                 action_idx = ai_agent.choose_action(current_state, training=True)
                 action = ai_agent.ACTIONS[action_idx]
                 
-                # Simular teclas presionadas
                 simulated_keys = {k: False for k in [pygame.K_LEFT, pygame.K_RIGHT, 
                                                       pygame.K_UP, pygame.K_DOWN, 
                                                       pygame.K_SPACE]}
                 for key in action:
                     simulated_keys[key] = True
                 
-                # Convertir a objeto similar a pygame.key.get_pressed()
                 class KeyPress:
                     def __init__(self, key_dict):
                         self.keys = key_dict
@@ -825,11 +763,9 @@ def main():
                 keys_obj = KeyPress(simulated_keys)
                 game.update(keys_obj)
                 
-                # Calcular recompensa
                 reward = ai_agent.calculate_reward(game, current_state, action_idx)
                 ai_agent.current_episode_score += reward
                 
-                # Guardar experiencia
                 next_state = ai_agent.get_state(game)
                 done = game.game_state in [STATE_GAME_OVER, STATE_WIN]
                 
@@ -840,13 +776,10 @@ def main():
                 prev_state = current_state
                 prev_action = action_idx
                 
-                # Entrenar cada ciertos frames
                 if game.frame_count % 4 == 0:
                     ai_agent.train_step()
             
-            # Reiniciar episodio
             elif game.game_state in [STATE_GAME_OVER, STATE_WIN]:
-                # Actualizar estadísticas
                 ai_agent.stats.episodes += 1
                 episodes_this_session += 1
                 
@@ -862,24 +795,20 @@ def main():
                                                 ai_agent.current_episode_score)
                 ai_agent.stats.epsilon = ai_agent.epsilon
                 
-                # Guardar modelo cada 50 episodios
                 if ai_agent.stats.episodes % 50 == 0:
                     ai_agent.save_model()
                     print(f"Episodio {ai_agent.stats.episodes}: "
                           f"Score={ai_agent.current_episode_score:.1f}, "
                           f"Epsilon={ai_agent.epsilon:.3f}")
                 
-                # Reiniciar juego
                 game = Game(use_background=False)
                 ai_agent.current_episode_score = 0
                 ai_agent.last_distance_to_princess = float('inf')
                 prev_state = None
                 prev_action = None
             
-            # Dibujar
             game.draw(screen, show_debug=True)
             
-            # Panel de estadísticas de entrenamiento
             panel_height = 180
             panel = pygame.Surface((SCREEN_WIDTH, panel_height), pygame.SRCALPHA)
             panel.fill((0, 0, 0, 200))
@@ -906,17 +835,14 @@ def main():
                 screen.blit(surf, (20, y_pos))
                 y_pos += 22
         
-        # ===== MODO: IA DEMOSTRANDO =====
         elif game_mode == STATE_AI_DEMO:
             keys = pygame.key.get_pressed()
             
             if game.game_state == STATE_PLAYING:
-                # IA elige acción
                 current_state = ai_agent.get_state(game)
                 action_idx = ai_agent.choose_action(current_state, training=False)
                 action = ai_agent.ACTIONS[action_idx]
                 
-                # Simular teclas
                 simulated_keys = {k: False for k in [pygame.K_LEFT, pygame.K_RIGHT, 
                                                       pygame.K_UP, pygame.K_DOWN, 
                                                       pygame.K_SPACE]}
@@ -939,12 +865,10 @@ def main():
             game.draw(screen, show_debug=False)
             button_back.draw(screen)
             
-            # Indicador de IA
             font = pygame.font.SysFont("Arial", 24, bold=True)
             ai_text = font.render("IA JUGANDO", True, (100, 255, 100))
             screen.blit(ai_text, (SCREEN_WIDTH - 160, 20))
             
-            # Mensajes de estado
             font_msg = pygame.font.SysFont("Arial", 32, bold=True)
             if game.game_state == STATE_GAME_OVER:
                 text = font_msg.render("GAME OVER - Pulsa R para reiniciar", True, (255, 50, 50))
@@ -955,7 +879,6 @@ def main():
         
         pygame.display.flip()
     
-    # Guardar modelo al salir
     ai_agent.save_model()
     pygame.quit()
 
