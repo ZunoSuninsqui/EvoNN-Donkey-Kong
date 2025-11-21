@@ -1,0 +1,161 @@
+"""NEAT training script for the Donkey Kong prototype.
+
+Usage
+-----
+python train_neat_dk.py --generations 50
+python train_neat_dk.py --visual  # slower, shows multiple agents at once
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import pickle
+from pathlib import Path
+from typing import List
+
+import neat
+
+from Game.ExecuteGame import GameEnv, SCREEN_HEIGHT, SCREEN_WIDTH
+
+BEST_RUN: dict = {"fitness": float("-inf"), "record": None, "genome": None}
+RUN_VISUAL = False
+
+
+def argmax_action(outputs: List[float]) -> int:
+    return int(max(range(len(outputs)), key=lambda i: outputs[i]))
+
+
+def evaluate_single(genome: neat.DefaultGenome, config: neat.Config) -> GameEnv:
+    env = GameEnv(mode="ai", render=False, fast_mode=True, record=True, show_debug=False)
+    net = neat.nn.FeedForwardNetwork.create(genome, config)
+    state = env.reset()
+    done = False
+
+    while not done:
+        outputs = net.activate(state)
+        action = argmax_action(outputs)
+        state, _, done, _ = env.step(action)
+
+    genome.fitness = env.total_reward
+
+    if env.game and env.game.game_state == "WIN" and env.total_reward > BEST_RUN["fitness"]:
+        BEST_RUN.update({"fitness": env.total_reward, "record": env.get_recorded_actions(), "genome": genome})
+
+    return env
+
+
+def render_top_agents(genomes, config: neat.Config, top_n: int = 4, frames: int = 600) -> None:
+    """Visualize the best agents of the current generation side-by-side."""
+
+    sorted_genomes = sorted(genomes, key=lambda g: g[1].fitness or 0.0, reverse=True)[:top_n]
+    if not sorted_genomes:
+        return
+
+    cols = min(top_n, 2)
+    rows = math.ceil(len(sorted_genomes) / cols)
+    import pygame
+
+    pygame.init()
+    screen = pygame.display.set_mode((cols * SCREEN_WIDTH, rows * SCREEN_HEIGHT))
+    pygame.display.set_caption("NEAT visual generation preview")
+    clock = pygame.time.Clock()
+
+    envs: List[GameEnv] = []
+    nets = []
+    positions = []
+
+    for idx, (_, genome) in enumerate(sorted_genomes):
+        surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        env = GameEnv(render=True, fast_mode=True, show_debug=False, surface=surf)
+        env.reset()
+        envs.append(env)
+        nets.append(neat.nn.FeedForwardNetwork.create(genome, config))
+        col = idx % cols
+        row = idx // cols
+        positions.append((col * SCREEN_WIDTH, row * SCREEN_HEIGHT))
+
+    for _ in range(frames):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
+        screen.fill((0, 0, 0))
+        for env, net, pos in zip(envs, nets, positions):
+            if not env.done:
+                action = argmax_action(net.activate(env.get_state()))
+                env.step(action)
+            screen.blit(env.screen, pos)
+
+        pygame.display.flip()
+        clock.tick(120)
+
+    pygame.quit()
+
+
+def eval_genomes(genomes, config):
+    for _, genome in genomes:
+        genome.fitness = 0.0
+        evaluate_single(genome, config)
+
+    if RUN_VISUAL:
+        render_top_agents(genomes, config)
+
+
+def save_artifacts(genome: neat.DefaultGenome, record: list | None) -> None:
+    with open("best_genome.pkl", "wb") as f:
+        pickle.dump(genome, f)
+
+    if record:
+        with open("best_inputs.txt", "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train NEAT to play Donkey Kong")
+    parser.add_argument("--config", default="config-neat-dk.ini", help="Path to NEAT config file")
+    parser.add_argument("--generations", type=int, default=50, help="Number of generations to train")
+    parser.add_argument("--visual", action="store_true", help="Render a small visual demo each generation")
+    args = parser.parse_args()
+
+    global RUN_VISUAL
+    RUN_VISUAL = args.visual
+
+    config_path = Path(args.config)
+    config = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        config_path,
+    )
+
+    population = neat.Population(config)
+    population.add_reporter(neat.StdOutReporter(True))
+    population.add_reporter(neat.StatisticsReporter())
+
+    winner = population.run(eval_genomes, args.generations)
+
+    best_genome = BEST_RUN.get("genome") or winner
+
+    if BEST_RUN.get("record") is None:
+        # Evaluate the winning genome once more to capture its action trace.
+        env = GameEnv(mode="ai", render=False, fast_mode=True, record=True, show_debug=False)
+        net = neat.nn.FeedForwardNetwork.create(best_genome, config)
+        state = env.reset()
+        done = False
+        while not done:
+            action = argmax_action(net.activate(state))
+            state, _, done, _ = env.step(action)
+        BEST_RUN.update({"record": env.get_recorded_actions(), "fitness": env.total_reward})
+
+    save_artifacts(best_genome, BEST_RUN.get("record"))
+
+    print("Training finished. Best fitness:", BEST_RUN.get("fitness"))
+    print("Artifacts saved: best_genome.pkl, best_inputs.txt")
+
+
+if __name__ == "__main__":
+    main()
+
