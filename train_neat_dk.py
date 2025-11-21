@@ -3,8 +3,8 @@
 Usage
 -----
 python train_neat_dk.py --generations 50
-python train_neat_dk.py --visual               # slower, shows multiple agents at once
-python train_neat_dk.py --live --live-agents 6  # live grid with multiple agents per generation
+python train_neat_dk.py --visual  # slower, shows multiple agents at once
+python train_neat_dk.py --live    # live grid with multiple agents per generation
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from Game.ExecuteGame import GameEnv, SCREEN_HEIGHT, SCREEN_WIDTH
 BEST_RUN: dict = {"fitness": float("-inf"), "record": None, "genome": None}
 RUN_VISUAL = False
 RUN_LIVE = False
-LIVE_MAX_AGENTS = 6
 
 
 def argmax_action(outputs: List[float]) -> int:
@@ -118,60 +117,53 @@ def render_generation_live(
 
     pygame.init()
 
-    try:
-        count = min(max_agents, len(genomes))
-        cols = math.ceil(math.sqrt(count))
-        rows = math.ceil(count / cols)
+    count = min(max_agents, len(genomes))
+    cols = math.ceil(math.sqrt(count))
+    rows = math.ceil(count / cols)
 
-        screen = pygame.display.set_mode((cols * SCREEN_WIDTH, rows * SCREEN_HEIGHT))
-        pygame.display.set_caption("NEAT live generation monitor")
-        clock = pygame.time.Clock()
+    screen = pygame.display.set_mode((cols * SCREEN_WIDTH, rows * SCREEN_HEIGHT))
+    pygame.display.set_caption("NEAT live generation monitor")
+    clock = pygame.time.Clock()
 
-        envs: List[GameEnv] = []
-        nets = []
-        positions = []
+    envs: List[GameEnv] = []
+    nets = []
+    positions = []
 
-        for idx, (_, genome) in enumerate(genomes[:count]):
-            surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-            env = GameEnv(mode="ai", render=True, fast_mode=True, record=False, show_debug=False, surface=surface)
-            env.reset()
-            envs.append(env)
-            nets.append(neat.nn.FeedForwardNetwork.create(genome, config))
-            col = idx % cols
-            row = idx // cols
-            positions.append((col * SCREEN_WIDTH, row * SCREEN_HEIGHT))
+    for idx, (_, genome) in enumerate(genomes[:count]):
+        surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        env = GameEnv(mode="ai", render=True, fast_mode=True, record=False, show_debug=False, surface=surface)
+        env.reset()
+        envs.append(env)
+        nets.append(neat.nn.FeedForwardNetwork.create(genome, config))
+        col = idx % cols
+        row = idx // cols
+        positions.append((col * SCREEN_WIDTH, row * SCREEN_HEIGHT))
 
-        running = True
-        while running and not stop_event.is_set():
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    stop_event.set()
-                    running = False
-                    break
-
-            screen.fill((0, 0, 0))
-            active = False
-            for env, net, pos in zip(envs, nets, positions):
-                if stop_event.is_set():
-                    running = False
-                    break
-
-                if not env.done:
-                    active = True
-                    action = argmax_action(net.activate(env.get_state()))
-                    env.step(action)
-                screen.blit(env.screen, pos)
-
-            pygame.display.flip()
-            if not active:
+    running = True
+    while running and not stop_event.is_set():
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                stop_event.set()
+                running = False
                 break
-            if fps > 0:
-                clock.tick(fps)
-            else:
-                clock.tick()
-    finally:
-        # Close the live display so training can continue headless between generations.
-        pygame.display.quit()
+
+        screen.fill((0, 0, 0))
+        active = False
+        for env, net, pos in zip(envs, nets, positions):
+            if not env.done:
+                active = True
+                action = argmax_action(net.activate(env.get_state()))
+                env.step(action)
+            screen.blit(env.screen, pos)
+
+        pygame.display.flip()
+        if not active:
+            break
+        clock.tick(fps)
+
+    # Do not pygame.quit() here to avoid interfering with headless environments
+    # created elsewhere. Simply leave the display as-is; it will be reused or
+    # closed when the process exits.
 
 
 def eval_genomes(genomes, config):
@@ -181,7 +173,7 @@ def eval_genomes(genomes, config):
     if RUN_LIVE:
         live_stop = threading.Event()
         live_thread = threading.Thread(
-            target=render_generation_live, args=(genomes, config, live_stop, LIVE_MAX_AGENTS), daemon=True
+            target=render_generation_live, args=(genomes, config, live_stop), daemon=True
         )
         live_thread.start()
 
@@ -193,7 +185,7 @@ def eval_genomes(genomes, config):
         if live_stop is not None:
             live_stop.set()
         if live_thread is not None:
-            live_thread.join(timeout=2.0)
+            live_thread.join(timeout=1.0)
 
     if RUN_VISUAL:
         render_top_agents(genomes, config)
@@ -216,17 +208,11 @@ def main() -> None:
     parser.add_argument("--generations", type=int, default=50, help="Number of generations to train")
     parser.add_argument("--visual", action="store_true", help="Render a small visual demo each generation")
     parser.add_argument("--live", action="store_true", help="Live grid of multiple agents per generation")
-    parser.add_argument(
-        "--live-agents",
-        type=int,
-        default=LIVE_MAX_AGENTS,
-        help="Max number of agents to render simultaneously when --live is enabled",
-    )
     args = parser.parse_args()
 
     RUN_VISUAL = args.visual
+    global RUN_LIVE
     RUN_LIVE = args.live
-    LIVE_MAX_AGENTS = max(1, args.live_agents)
 
     config_path = Path(args.config)
     config = neat.Config(
