@@ -201,6 +201,8 @@ def save_artifacts(genome: neat.DefaultGenome, record: list | None) -> None:
 
 
 def main() -> None:
+    global RUN_VISUAL, RUN_LIVE, LIVE_MAX_AGENTS
+
     parser = argparse.ArgumentParser(description="Train NEAT to play Donkey Kong")
     parser.add_argument("--config", default="config-neat-dk.ini", help="Path to NEAT config file")
     parser.add_argument("--generations", type=int, default=50, help="Number of generations to train")
@@ -208,7 +210,6 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="Live grid of multiple agents per generation")
     args = parser.parse_args()
 
-    global RUN_VISUAL
     RUN_VISUAL = args.visual
     global RUN_LIVE
     RUN_LIVE = args.live
